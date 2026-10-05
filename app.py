@@ -44,20 +44,28 @@ class InstagramAPI:
         self.account_id = instagram_account_id or self._get_instagram_account_id()
 
     def _get_instagram_account_id(self):
-        """액세스 토큰으로 연결된 Instagram 비즈니스/크리에이터 계정 ID 자동 탐색"""
+        """Facebook 페이지에 연결된 Instagram 비즈니스 계정 ID 자동 탐색"""
         url = f"{self.base_url}/me/accounts"
         params = {
-            'fields': 'instagram_business_account',
+            'fields': 'instagram_business_account,name',
             'access_token': self.access_token
         }
         res = requests.get(url, params=params).json()
+        
+        # 1. /me/accounts 에서 연결된 Instagram 비즈니스 계정 찾기
         for page in res.get('data', []):
             if 'instagram_business_account' in page:
                 return page['instagram_business_account']['id']
+                
+        # 2. 찾지 못할 경우 /me 로 폴백
         return "me"
 
     def get_reels_media(self):
         """계정의 최근 릴스/미디어 목록 및 인사이트 조회"""
+        if not self.account_id or self.account_id == "me":
+            st.error("연동된 Instagram 비즈니스 계정 ID를 찾을 수 없습니다. 페이스북 페이지와 인스타그램 계정이 연결되어 있는지 확인해주세요.")
+            return []
+
         url = f"{self.base_url}/{self.account_id}/media"
         params = {
             'fields': 'id,caption,media_type,media_url,like_count,comments_count,insights.metric(plays,reach,total_interactions)',
@@ -65,7 +73,8 @@ class InstagramAPI:
         }
         response = requests.get(url, params=params)
         if response.status_code != 200:
-            st.error(f"API 호출 실패: {response.json().get('error', {}).get('message', '알 수 없는 오류')}")
+            err_msg = response.json().get('error', {}).get('message', '알 수 없는 오류')
+            st.error(f"API 호출 실패: {err_msg}")
             return []
 
         data = response.json().get('data', [])
@@ -133,12 +142,13 @@ secret_redirect_uri = st.secrets.get("REDIRECT_URI", "https://instagram-reels-an
 
 views = 0
 
-# 모드 1: 토큰 직접 입력 (가장 안정적)
+# 모드 1: 토큰 직접 입력
 if auth_mode == "Access Token 직접 입력":
     st.sidebar.markdown("---")
     user_token = st.sidebar.text_input("Instagram Access Token 입력", type="password")
     if user_token:
-        ig_api = InstagramAPI(user_token)
+        # None을 전달하여 _get_instagram_account_id()로 비즈니스 계정 ID를 자동 검색하도록 설정
+        ig_api = InstagramAPI(user_token, instagram_account_id=None)
         reels_data = ig_api.get_reels_media()
         if reels_data:
             df_reels = pd.DataFrame(reels_data)
@@ -168,13 +178,12 @@ elif auth_mode == "Meta OAuth 로그인":
             short_token = short_res['access_token']
             long_res = get_long_lived_token(CLIENT_ID, CLIENT_SECRET, short_token)
             st.session_state['access_token'] = long_res.get('access_token', short_token)
-            st.session_state['user_id'] = short_res.get('user_id')
             st.query_params.clear()
             st.rerun()
 
     if 'access_token' in st.session_state:
         st.success("✅ Instagram 계정이 연동되었습니다!")
-        ig_api = InstagramAPI(st.session_state['access_token'])
+        ig_api = InstagramAPI(st.session_state['access_token'], instagram_account_id=None)
         reels_data = ig_api.get_reels_media()
         
         if reels_data:
