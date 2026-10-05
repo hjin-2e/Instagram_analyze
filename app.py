@@ -41,7 +41,6 @@ class InstagramAPI:
             return []
 
         url = f"{self.base_url}/{self.account_id}/media"
-        # Meta API 최신 규격 반영: plays -> views 변경
         params = {
             'fields': 'id,caption,media_type,media_url,like_count,comments_count,insights.metric(views)',
             'access_token': self.access_token
@@ -76,12 +75,12 @@ class InstagramAPI:
                 })
         return reels_list
 
-def calculate_metrics(views, streaming_count, ad_budget, cpc_estimate=300, cpm_estimate=4000):
-    """릴스 성과 분석 및 음원 유입 / 광고 시뮬레이션 계산"""
+def calculate_metrics(views, streaming_count, ad_budget, stream_revenue=3, cpc_estimate=300, cpm_estimate=4000):
+    """릴스 성과 분석 및 상세 광고 효율 시뮬레이션 계산"""
     conversion_rate = (streaming_count / views * 100) if views > 0 else 0
     views_per_stream = round(views / streaming_count, 1) if streaming_count > 0 else 0
 
-    # 릴스 성과 등급 판정
+    # 릴스 콘텐츠 성과 등급 판정
     if views >= 100000 and conversion_rate >= 3.0:
         grade = "S (대형 바이럴 & 높은 음원 전환)"
     elif views >= 50000 or conversion_rate >= 2.0:
@@ -91,10 +90,15 @@ def calculate_metrics(views, streaming_count, ad_budget, cpc_estimate=300, cpm_e
     else:
         grade = "C (개선 필요)"
 
-    # 광고 집행 시 예상 유입 예측
+    # 광고 집행 시 예상 유입 시뮬레이션
     paid_views = int((ad_budget / cpm_estimate) * 1000) if ad_budget > 0 else 0
     paid_clicks = int(ad_budget / cpc_estimate) if ad_budget > 0 else 0
     paid_streams = int(paid_views * (conversion_rate / 100)) if ad_budget > 0 else 0
+    
+    # 음원 유입 단가 (CPA: Cost Per Acquisition) 및 예상 매출/ROAS
+    cpa_per_stream = round(ad_budget / paid_streams) if paid_streams > 0 else 0
+    est_revenue = paid_streams * stream_revenue
+    roas = round((est_revenue / ad_budget) * 100, 1) if ad_budget > 0 else 0
 
     return {
         "conversion_rate": round(conversion_rate, 2),
@@ -102,7 +106,10 @@ def calculate_metrics(views, streaming_count, ad_budget, cpc_estimate=300, cpm_e
         "grade": grade,
         "paid_views": paid_views,
         "paid_clicks": paid_clicks,
-        "paid_streams": paid_streams
+        "paid_streams": paid_streams,
+        "cpa_per_stream": cpa_per_stream,
+        "est_revenue": est_revenue,
+        "roas": roas
     }
 
 # ================= =====================
@@ -120,6 +127,7 @@ st.sidebar.markdown("---")
 st.sidebar.header("⚙️ 광고 단가 기준 설정")
 cpm_estimate = st.sidebar.number_input("추정 CPM (1,000회 노출 비용 / 원)", value=4000, step=500)
 cpc_estimate = st.sidebar.number_input("추정 CPC (클릭당 비용 / 원)", value=300, step=50)
+stream_revenue = st.sidebar.number_input("1회 스트리밍 단가 (원)", value=3.0, step=0.5, help="음원 정산 단가 기본값 약 3원")
 
 views = 0
 
@@ -144,17 +152,19 @@ else:
 
 # 음원 유입 수 및 광고 예산 입력 폼
 st.markdown("---")
+st.subheader("⚙️ 음원 유입 수 및 광고 예산 입력")
 col1, col2 = st.columns(2)
 with col1:
-    streaming_count = st.number_input("🎵 멜론/스포티파이 음원 스트리밍 유입 수", value=450, step=10)
+    streaming_count = st.number_input("🎵 멜론/스포티파이 음원 스트리밍 유입 수", value=450, step=10, help="이 릴스를 통해 실제 유입된 것으로 추정되는 스트리밍 건수")
 with col2:
     ad_budget = st.number_input("💰 집행(예정) 광고 비용 (원)", value=50000, step=10000)
 
 # 분석 결과 출력
-if views > 0:
-    res = calculate_metrics(views, streaming_count, ad_budget, cpc_estimate, cpm_estimate)
+if views > 0 and streaming_count > 0:
+    res = calculate_metrics(views, streaming_count, ad_budget, stream_revenue, cpc_estimate, cpm_estimate)
+    
     st.markdown("---")
-    st.subheader("📈 릴스 성과 분석 결과")
+    st.subheader("📈 1. 릴스 자연 성과 분석")
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("총 릴스 조회수", f"{views:,} 회")
@@ -163,8 +173,21 @@ if views > 0:
     m4.metric("콘텐츠 등급", res['grade'])
 
     if ad_budget > 0:
-        st.subheader("🎯 광고 집행 시 예상 효율 시뮬레이션")
+        st.markdown("---")
+        st.subheader("🎯 2. 광고 태웠을 때 유입 성과 & 효율 분석")
+        
         a1, a2, a3 = st.columns(3)
         a1.metric("예상 추가 노출 (CPM 기준)", f"+{res['paid_views']:,} 회")
-        a2.metric("예상 프로필/링크 클릭 (CPC 기준)", f"+{res['paid_clicks']:,} 회")
+        a2.metric("예상 클릭 수 (CPC 기준)", f"+{res['paid_clicks']:,} 회")
         a3.metric("예상 추가 음원 스트리밍", f"+{res['paid_streams']:,} 회")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        b1, b2, b3 = st.columns(3)
+        b1.metric("음원 1유입당 광고 비용 (CPA)", f"약 {res['cpa_per_stream']:,} 원 / 1유입")
+        b2.metric("추가 음원 정산 예상액", f"약 {res['est_revenue']:,} 원")
+        b3.metric("예상 ROAS (광고비 대비 음원수익)", f"{res['roas']} %")
+        
+        if res['cpa_per_stream'] <= 200:
+            st.success("💡 **광고 집행 추천**: 음원 유입 단가(CPA)가 낮아 광고 예산을 증액하면 효율적인 음원 유입이 가능합니다!")
+        else:
+            st.warning("⚠️ **참고**: 음원 유입 단가가 높으므로 릴스 소재(썸네일/초반 3초)를 보완 후 광고를 집행하는 것을 권장합니다.")
