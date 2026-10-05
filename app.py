@@ -28,12 +28,12 @@ def get_short_lived_token(client_id, client_secret, redirect_uri, code):
     response = requests.post(url, data=payload)
     return response.json()
 
-def get_long_lived_token(client_secret, short_token):
+def get_long_lived_token(client_id, client_secret, short_token):
     """단기 토큰을 60일 유효한 장기 토큰으로 교환"""
     url = "https://graph.facebook.com/v19.0/oauth/access_token"
     params = {
         'grant_type': 'fb_exchange_token',
-        'client_id': st.secrets.get("CLIENT_ID") or "",
+        'client_id': client_id,
         'client_secret': client_secret,
         'fb_exchange_token': short_token
     }
@@ -41,10 +41,23 @@ def get_long_lived_token(client_secret, short_token):
     return response.json()
 
 class InstagramAPI:
-    def __init__(self, access_token, instagram_account_id):
+    def __init__(self, access_token, instagram_account_id=None):
         self.access_token = access_token
-        self.account_id = instagram_account_id
         self.base_url = "https://graph.facebook.com/v19.0"
+        self.account_id = instagram_account_id or self._get_instagram_account_id()
+
+    def _get_instagram_account_id(self):
+        """액세스 토큰으로 연결된 Instagram 비즈니스/크리에이터 계정 ID 자동 탐색"""
+        url = f"{self.base_url}/me/accounts"
+        params = {
+            'fields': 'instagram_business_account',
+            'access_token': self.access_token
+        }
+        res = requests.get(url, params=params).json()
+        for page in res.get('data', []):
+            if 'instagram_business_account' in page:
+                return page['instagram_business_account']['id']
+        return "me"
 
     def get_reels_media(self):
         """계정의 최근 릴스/미디어 목록 및 인사이트 조회"""
@@ -149,7 +162,7 @@ if not use_demo:
         
         if 'access_token' in short_res:
             short_token = short_res['access_token']
-            long_res = get_long_lived_token(CLIENT_SECRET, short_token)
+            long_res = get_long_lived_token(CLIENT_ID, CLIENT_SECRET, short_token)
             st.session_state['access_token'] = long_res.get('access_token', short_token)
             st.session_state['user_id'] = short_res.get('user_id')
             st.query_params.clear()
@@ -164,7 +177,7 @@ if use_demo:
     views = st.number_input("릴스 조회수 (직접 입력)", value=25000, step=1000)
 else:
     if 'access_token' in st.session_state:
-        st.success(f"✅ Instagram 계정이 연동되었습니다! (User ID: {st.session_state.get('user_id')})")
+        st.success("✅ Instagram 계정이 연동되었습니다!")
         instagram_account_id = st.session_state.get('user_id')
         
         ig_api = InstagramAPI(st.session_state['access_token'], instagram_account_id)
@@ -189,7 +202,7 @@ else:
                 f"https://www.facebook.com/v19.0/dialog/oauth"
                 f"?client_id={CLIENT_ID}"
                 f"&redirect_uri={REDIRECT_URI}"
-                f"&scope=instagram_basic,instagram_manage_insights,pages_show_list,pages_read_engagement"
+                f"&scope=instagram_business_basic,instagram_business_manage_comments,instagram_business_manage_messages"
                 f"&response_type=code"
             )
             st.warning("Instagram 연동을 진행하려면 아래 로그인 버튼을 눌러주세요.")
