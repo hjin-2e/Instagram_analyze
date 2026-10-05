@@ -41,8 +41,9 @@ class InstagramAPI:
             return []
 
         url = f"{self.base_url}/{self.account_id}/media"
+        # Meta API 최신 규격 반영: plays -> views 변경
         params = {
-            'fields': 'id,caption,media_type,media_url,like_count,comments_count,insights.metric(plays)',
+            'fields': 'id,caption,media_type,media_url,like_count,comments_count,insights.metric(views)',
             'access_token': self.access_token
         }
         response = requests.get(url, params=params)
@@ -56,20 +57,20 @@ class InstagramAPI:
         reels_list = []
         for item in data:
             if item.get('media_type') in ['VIDEO', 'REELS']:
-                plays = 0
+                views_count = 0
                 insights = item.get('insights', {}).get('data', [])
                 for metric in insights:
-                    if metric['name'] == 'plays':
-                        plays = metric['values'][0]['value']
+                    if metric['name'] == 'views':
+                        views_count = metric['values'][0]['value']
                 
                 raw_caption = item.get('caption', '캡션 없음').replace('\n', ' ')
                 short_caption = raw_caption[:20] + '..' if len(raw_caption) > 20 else raw_caption
                 
                 reels_list.append({
                     'id': item['id'],
-                    'display_label': f"[{item['id'][-4:]}] {short_caption} | 조회수 {plays:,}회",
+                    'display_label': f"[{item['id'][-4:]}] {short_caption} | 조회수 {views_count:,}회",
                     'caption': raw_caption,
-                    'views': plays,
+                    'views': views_count,
                     'likes': item.get('like_count', 0),
                     'comments': item.get('comments_count', 0)
                 })
