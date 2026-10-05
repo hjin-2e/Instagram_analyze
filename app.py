@@ -1,11 +1,45 @@
-import os
 import requests
 import pandas as pd
 import streamlit as st
 
 # ================= =====================
-# 1. Instagram Graph API 연동 클래스
+# 1. Streamlit 기본 페이지 및 번역 오류 방지 설정
 # ================= =====================
+st.set_page_config(page_title="릴스 성과 & 광고 효율 분석기", layout="wide")
+
+# Google 번역으로 인한 removeChild DOM 에러 방지 HTML
+st.markdown("""
+    <html lang="ko" class="notranslate">
+    <head><meta name="google" content="notranslate" /></head>
+""", unsafe_allow_html=True)
+
+# ================= =====================
+# 2. Instagram API & OAuth 처리 클래스/함수
+# ================= =====================
+def get_short_lived_token(client_id, client_secret, redirect_uri, code):
+    """인증 코드로 단기 액세스 토큰 교환"""
+    url = "https://api.instagram.com/oauth/access_token"
+    payload = {
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'grant_type': 'authorization_code',
+        'redirect_uri': redirect_uri,
+        'code': code
+    }
+    response = requests.post(url, data=payload)
+    return response.json()
+
+def get_long_lived_token(client_secret, short_token):
+    """단기 토큰을 60일 유효한 장기 토큰으로 교환"""
+    url = "https://graph.instagram.com/access_token"
+    params = {
+        'grant_type': 'ig_exchange_token',
+        'client_secret': client_secret,
+        'access_token': short_token
+    }
+    response = requests.get(url, params=params)
+    return response.json()
+
 class InstagramAPI:
     def __init__(self, access_token, instagram_account_id):
         self.access_token = access_token
@@ -20,7 +54,6 @@ class InstagramAPI:
             'access_token': self.access_token
         }
         response = requests.get(url, params=params)
-        
         if response.status_code != 200:
             st.error(f"API 호출 실패: {response.json().get('error', {}).get('message', '알 수 없는 오류')}")
             return []
@@ -48,16 +81,11 @@ class InstagramAPI:
                 })
         return reels_list
 
-
-# ================= =====================
-# 2. 성과 및 광고 효율 계산 로직
-# ================= =====================
 def calculate_metrics(views, streaming_count, ad_budget, cpc_estimate=300, cpm_estimate=4000):
-    # 1. 음원 전환율 계산 (조회수 대비 음원 스트리밍 수)
+    """성과 지표 및 광고 효율 계산"""
     conversion_rate = (streaming_count / views * 100) if views > 0 else 0
     views_per_stream = round(views / streaming_count, 1) if streaming_count > 0 else 0
 
-    # 2. 성과 등급 판정
     if views >= 100000 and conversion_rate >= 3.0:
         grade = "S (대형 바이럴 & 높은 음원 전환)"
     elif views >= 50000 or conversion_rate >= 2.0:
@@ -67,7 +95,6 @@ def calculate_metrics(views, streaming_count, ad_budget, cpc_estimate=300, cpm_e
     else:
         grade = "C (개선 필요)"
 
-    # 3. 광고 집행 시 예상 효율
     paid_views = int((ad_budget / cpm_estimate) * 1000) if ad_budget > 0 else 0
     paid_clicks = int(ad_budget / cpc_estimate) if ad_budget > 0 else 0
     paid_streams = int(paid_views * (conversion_rate / 100)) if ad_budget > 0 else 0
@@ -81,46 +108,66 @@ def calculate_metrics(views, streaming_count, ad_budget, cpc_estimate=300, cpm_e
         "paid_streams": paid_streams
     }
 
-
 # ================= =====================
-# 3. Streamlit 대시보드 UI
+# 3. Streamlit UI 메인 화면
 # ================= =====================
-st.set_page_config(page_title="릴스 성과 & 광고 효율 분석기", layout="wide")
-
-# 자동 번역으로 인한 removeChild 에러 방지 HTML
-st.markdown("""
-    <html lang="ko" class="notranslate">
-    <head>
-        <meta name="google" content="notranslate" />
-    </head>
-""", unsafe_allow_html=True)
-
 st.title("📊 인스타그램 릴스 & 음원 유입 성과 분석기")
 st.write("인스타그램 연동을 통해 릴스 조회수를 자동으로 불러오고, 광고 대비 음원 스트리밍 유입을 계산합니다.")
 
-# 사이드바: API 설정
-st.sidebar.header("🔑 Instagram API 설정")
-access_token = st.sidebar.text_input("Meta Access Token", type="password")
-instagram_account_id = st.sidebar.text_input("Instagram Business Account ID")
+# 사이드바 1: Meta OAuth / API 설정 (Secrets 우선, 없을 시 사이드바 입력값)
+st.sidebar.header("🔑 Meta OAuth 설정")
+secret_client_id = st.secrets.get("CLIENT_ID", "")
+secret_client_secret = st.secrets.get("CLIENT_SECRET", "")
+secret_redirect_uri = st.secrets.get("REDIRECT_URI", "https://instagram-reels-analyzer.streamlit.app/")
 
-# 광고 단가 조정 옵션
+input_client_id = st.sidebar.text_input("Meta App ID", value=secret_client_id)
+input_client_secret = st.sidebar.text_input("Meta App Secret", value=secret_client_secret, type="password")
+redirect_uri = st.sidebar.text_input("Redirect URI", value=secret_redirect_uri)
+
+CLIENT_ID = input_client_id
+CLIENT_SECRET = input_client_secret
+REDIRECT_URI = redirect_uri
+
+# 사이드바 2: 광고 단가 설정
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ 광고 단가 설정")
 cpm_estimate = st.sidebar.number_input("추정 CPM (1,000회 노출 비용)", value=4000, step=500)
 cpc_estimate = st.sidebar.number_input("추정 CPC (클릭당 비용)", value=300, step=50)
 
-# 시뮬레이션 샘플 데이터 모드 옵션
+# 사이드바 3: 더미 데이터 모드
 st.sidebar.markdown("---")
 use_demo = st.sidebar.checkbox("API 연동 없이 더미 데이터로 테스트", value=True)
 
+# OAuth 로그인 및 토큰 리다이렉트 수신 감지
+query_params = st.query_params
+
+if not use_demo:
+    if 'code' in query_params and 'access_token' not in st.session_state:
+        auth_code = query_params['code']
+        st.info("🔄 Instagram 로그인 승인 확인 중...")
+        short_res = get_short_lived_token(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, auth_code)
+        
+        if 'access_token' in short_res:
+            short_token = short_res['access_token']
+            long_res = get_long_lived_token(CLIENT_SECRET, short_token)
+            st.session_state['access_token'] = long_res.get('access_token', short_token)
+            st.session_state['user_id'] = short_res.get('user_id')
+            st.query_params.clear()
+            st.rerun()
+        else:
+            st.error(f"인증 실패: {short_res.get('error_message', 'OAuth 오류가 발생했습니다. App ID/Secret을 확인하세요.')}")
+
 views = 0
+
 if use_demo:
-    st.info("💡 더미 데이터 모드로 작동 중입니다. 사이드바에서 수치를 자유롭게 수정해 보세요.")
-    selected_reels_views = st.number_input("릴스 조회수 (직접 입력)", value=25000, step=1000)
-    views = selected_reels_views
+    st.info("💡 더미 데이터 모드로 작동 중입니다. 수치를 자유롭게 조절하여 분석을 테스트해 보세요.")
+    views = st.number_input("릴스 조회수 (직접 입력)", value=25000, step=1000)
 else:
-    if access_token and instagram_account_id:
-        ig_api = InstagramAPI(access_token, instagram_account_id)
+    if 'access_token' in st.session_state:
+        st.success(f"✅ Instagram 계정이 연동되었습니다! (User ID: {st.session_state.get('user_id')})")
+        instagram_account_id = st.session_state.get('user_id')
+        
+        ig_api = InstagramAPI(st.session_state['access_token'], instagram_account_id)
         reels_data = ig_api.get_reels_media()
         
         if reels_data:
@@ -128,25 +175,36 @@ else:
             st.subheader("🎬 최근 릴스 목록")
             st.dataframe(df_reels[['id', 'caption', 'views', 'likes', 'comments']], use_container_width=True)
             
-            # 고유 display_label을 이용해 중복 방지
             selected_label = st.selectbox("분석할 릴스를 선택하세요", df_reels['display_label'])
             selected_row = df_reels[df_reels['display_label'] == selected_label].iloc[0]
             views = selected_row['views']
             st.success(f"선택한 릴스 조회수: {views:,} 회")
+        
+        if st.button("🚪 연동 해제 (로그아웃)"):
+            del st.session_state['access_token']
+            st.rerun()
     else:
-        st.warning("사이드바에 Access Token과 Account ID를 입력하거나 '더미 데이터로 테스트'를 체크하세요.")
+        if CLIENT_ID and CLIENT_SECRET:
+            auth_url = f"https://api.instagram.com/oauth/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&scope=user_profile,user_media&response_type=code"
+            st.warning("Instagram 연동을 진행하려면 아래 로그인 버튼을 눌러주세요.")
+            st.markdown(
+                f'<a href="{auth_url}" target="_self">'
+                f'<button style="background-color:#E1306C;color:white;padding:12px 24px;border:none;border-radius:8px;font-size:16px;font-weight:bold;cursor:pointer;">'
+                f'📸 Instagram 계정으로 로그인</button></a>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.warning("사이드바에서 Meta App ID와 Meta App Secret을 입력하거나, '더미 데이터로 테스트'를 선택해 주세요.")
 
-# 분석 입력 폼
+# 분석 입력 폼 및 결과 출력
 col1, col2 = st.columns(2)
 with col1:
     streaming_count = st.number_input("🎵 멜론/스포티파이 음원 스트리밍 유입 수", value=450, step=10)
 with col2:
     ad_budget = st.number_input("💰 집행(예정) 광고 비용 (원)", value=50000, step=10000)
 
-# 결과 계산 출력
 if views > 0:
     res = calculate_metrics(views, streaming_count, ad_budget, cpc_estimate, cpm_estimate)
-
     st.markdown("---")
     st.subheader("📈 성과 분석 결과")
 
