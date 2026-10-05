@@ -186,9 +186,9 @@ else:
     else:
         if CLIENT_ID and CLIENT_SECRET:
             auth_url = f"https://api.instagram.com/oauth/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&scope=user_profile,user_media&response_type=code"
-            st.warning("Instagram 연동을 진행하려면 아래 로그인 버튼을 눌러주세요.")
+
             st.markdown(
-                f'<a href="{auth_url}" target="_self">'
+                f'<a href="{auth_url}" target="_top">'
                 f'<button style="background-color:#E1306C;color:white;padding:12px 24px;border:none;border-radius:8px;font-size:16px;font-weight:bold;cursor:pointer;">'
                 f'📸 Instagram 계정으로 로그인</button></a>',
                 unsafe_allow_html=True
