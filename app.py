@@ -57,13 +57,12 @@ class InstagramAPI:
             if 'instagram_business_account' in page:
                 return page['instagram_business_account']['id']
                 
-        # 2. 찾지 못할 경우 /me 로 폴백
-        return "me"
+        return None
 
     def get_reels_media(self):
         """계정의 최근 릴스/미디어 목록 및 인사이트 조회"""
-        if not self.account_id or self.account_id == "me":
-            st.error("연동된 Instagram 비즈니스 계정 ID를 찾을 수 없습니다. 페이스북 페이지와 인스타그램 계정이 연결되어 있는지 확인해주세요.")
+        if not self.account_id:
+            st.error("연동된 Instagram 비즈니스 계정 ID를 찾을 수 없습니다. 페이스북 페이지 연결 상태를 확인하시거나 사이드바에 Instagram 계정 ID(178414...)를 직접 입력해주세요.")
             return []
 
         url = f"{self.base_url}/{self.account_id}/media"
@@ -142,13 +141,14 @@ secret_redirect_uri = st.secrets.get("REDIRECT_URI", "https://instagram-reels-an
 
 views = 0
 
-# 모드 1: 토큰 직접 입력
+# 모드 1: 토큰 직접 입력 (계정 ID 수동 입력 필드 추가)
 if auth_mode == "Access Token 직접 입력":
     st.sidebar.markdown("---")
     user_token = st.sidebar.text_input("Instagram Access Token 입력", type="password")
+    custom_ig_id = st.sidebar.text_input("Instagram 계정 ID (선택사항)", help="자동 탐색 실패 시 178414... 형식의 계정 ID를 입력하세요.")
+    
     if user_token:
-        # None을 전달하여 _get_instagram_account_id()로 비즈니스 계정 ID를 자동 검색하도록 설정
-        ig_api = InstagramAPI(user_token, instagram_account_id=None)
+        ig_api = InstagramAPI(user_token, instagram_account_id=custom_ig_id.strip() if custom_ig_id.strip() else None)
         reels_data = ig_api.get_reels_media()
         if reels_data:
             df_reels = pd.DataFrame(reels_data)
