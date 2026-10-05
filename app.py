@@ -198,11 +198,12 @@ else:
             st.rerun()
     else:
         if CLIENT_ID and CLIENT_SECRET:
+            # 💡 최소 핵심 권한인 instagram_basic 지정으로 개발자 포털 저장 오류 우회
             auth_url = (
                 f"https://www.facebook.com/v19.0/dialog/oauth"
                 f"?client_id={CLIENT_ID}"
                 f"&redirect_uri={REDIRECT_URI}"
-                f"&scope=public_profile"
+                f"&scope=instagram_basic"
                 f"&response_type=code"
             )
             st.warning("Instagram 연동을 진행하려면 아래 로그인 버튼을 눌러주세요.")
