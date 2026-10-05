@@ -17,12 +17,11 @@ st.markdown("""
 # 2. Instagram API & OAuth 처리 클래스/함수
 # ================= =====================
 def get_short_lived_token(client_id, client_secret, redirect_uri, code):
-    """인증 코드로 단기 액세스 토큰 교환"""
-    url = "https://api.instagram.com/oauth/access_token"
+    """인증 코드로 단기 액세스 토큰 교환 (Meta Graph API)"""
+    url = "https://graph.facebook.com/v19.0/oauth/access_token"
     payload = {
         'client_id': client_id,
         'client_secret': client_secret,
-        'grant_type': 'authorization_code',
         'redirect_uri': redirect_uri,
         'code': code
     }
@@ -31,11 +30,12 @@ def get_short_lived_token(client_id, client_secret, redirect_uri, code):
 
 def get_long_lived_token(client_secret, short_token):
     """단기 토큰을 60일 유효한 장기 토큰으로 교환"""
-    url = "https://graph.instagram.com/access_token"
+    url = "https://graph.facebook.com/v19.0/oauth/access_token"
     params = {
-        'grant_type': 'ig_exchange_token',
+        'grant_type': 'fb_exchange_token',
+        'client_id': st.secrets.get("CLIENT_ID") or "",
         'client_secret': client_secret,
-        'access_token': short_token
+        'fb_exchange_token': short_token
     }
     response = requests.get(url, params=params)
     return response.json()
@@ -185,7 +185,13 @@ else:
             st.rerun()
     else:
         if CLIENT_ID and CLIENT_SECRET:
-            auth_url = f"https://api.instagram.com/oauth/authorize?client_id={CLIENT_ID}&redirect_uri={REDIRECT_URI}&scope=user_profile,user_media&response_type=code"
+            auth_url = (
+                f"https://www.facebook.com/v19.0/dialog/oauth"
+                f"?client_id={CLIENT_ID}"
+                f"&redirect_uri={REDIRECT_URI}"
+                f"&scope=instagram_basic,instagram_manage_insights,pages_show_list,pages_read_engagement"
+                f"&response_type=code"
+            )
             st.warning("Instagram 연동을 진행하려면 아래 로그인 버튼을 눌러주세요.")
             st.link_button("📸 Instagram 계정으로 로그인", auth_url, type="primary", use_container_width=True)
         else:
