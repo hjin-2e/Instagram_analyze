@@ -7,7 +7,6 @@ import streamlit as st
 # ================= =====================
 st.set_page_config(page_title="릴스 성과 & 광고 효율 분석기", layout="wide")
 
-# Google 번역으로 인한 removeChild DOM 에러 방지 HTML
 st.markdown("""
     <html lang="ko" class="notranslate">
     <head><meta name="google" content="notranslate" /></head>
@@ -17,7 +16,6 @@ st.markdown("""
 # 2. Instagram API & OAuth 처리 클래스/함수
 # ================= =====================
 def get_short_lived_token(client_id, client_secret, redirect_uri, code):
-    """인증 코드로 단기 액세스 토큰 교환 (Meta Graph API)"""
     url = "https://graph.facebook.com/v19.0/oauth/access_token"
     payload = {
         'client_id': client_id,
@@ -29,7 +27,6 @@ def get_short_lived_token(client_id, client_secret, redirect_uri, code):
     return response.json()
 
 def get_long_lived_token(client_id, client_secret, short_token):
-    """단기 토큰을 60일 유효한 장기 토큰으로 교환"""
     url = "https://graph.facebook.com/v19.0/oauth/access_token"
     params = {
         'grant_type': 'fb_exchange_token',
@@ -95,7 +92,6 @@ class InstagramAPI:
         return reels_list
 
 def calculate_metrics(views, streaming_count, ad_budget, cpc_estimate=300, cpm_estimate=4000):
-    """성과 지표 및 광고 효율 계산"""
     conversion_rate = (streaming_count / views * 100) if views > 0 else 0
     views_per_stream = round(views / streaming_count, 1) if streaming_count > 0 else 0
 
@@ -127,34 +123,42 @@ def calculate_metrics(views, streaming_count, ad_budget, cpc_estimate=300, cpm_e
 st.title("📊 인스타그램 릴스 & 음원 유입 성과 분석기")
 st.write("인스타그램 연동을 통해 릴스 조회수를 자동으로 불러오고, 광고 대비 음원 스트리밍 유입을 계산합니다.")
 
-# 사이드바 1: Meta OAuth / API 설정 (Secrets 우선, 없을 시 사이드바 입력값)
-st.sidebar.header("🔑 Meta OAuth 설정")
+# 사이드바 1: 인증 연동 방식 선택
+st.sidebar.header("🔑 연동 방식 선택")
+auth_mode = st.sidebar.radio("인증 모드", ["Access Token 직접 입력", "Meta OAuth 로그인", "더미 데이터 테스트"])
+
 secret_client_id = st.secrets.get("CLIENT_ID", "")
 secret_client_secret = st.secrets.get("CLIENT_SECRET", "")
 secret_redirect_uri = st.secrets.get("REDIRECT_URI", "https://instagram-reels-analyzer.streamlit.app/")
 
-input_client_id = st.sidebar.text_input("Meta App ID", value=secret_client_id)
-input_client_secret = st.sidebar.text_input("Meta App Secret", value=secret_client_secret, type="password")
-redirect_uri = st.sidebar.text_input("Redirect URI", value=secret_redirect_uri)
+views = 0
 
-CLIENT_ID = input_client_id
-CLIENT_SECRET = input_client_secret
-REDIRECT_URI = redirect_uri
+# 모드 1: 토큰 직접 입력 (가장 안정적)
+if auth_mode == "Access Token 직접 입력":
+    st.sidebar.markdown("---")
+    user_token = st.sidebar.text_input("Instagram Access Token 입력", type="password")
+    if user_token:
+        ig_api = InstagramAPI(user_token)
+        reels_data = ig_api.get_reels_media()
+        if reels_data:
+            df_reels = pd.DataFrame(reels_data)
+            st.subheader("🎬 최근 릴스 목록")
+            st.dataframe(df_reels[['id', 'caption', 'views', 'likes', 'comments']], use_container_width=True)
+            
+            selected_label = st.selectbox("분석할 릴스를 선택하세요", df_reels['display_label'])
+            selected_row = df_reels[df_reels['display_label'] == selected_label].iloc[0]
+            views = selected_row['views']
+            st.success(f"선택한 릴스 조회수: {views:,} 회")
+    else:
+        st.info("💡 Meta 개발자 도구(Graph API Explorer)에서 생성한 액세스 토큰을 사이드바에 입력해 보세요.")
 
-# 사이드바 2: 광고 단가 설정
-st.sidebar.markdown("---")
-st.sidebar.header("⚙️ 광고 단가 설정")
-cpm_estimate = st.sidebar.number_input("추정 CPM (1,000회 노출 비용)", value=4000, step=500)
-cpc_estimate = st.sidebar.number_input("추정 CPC (클릭당 비용)", value=300, step=50)
+# 모드 2: OAuth 로그인
+elif auth_mode == "Meta OAuth 로그인":
+    CLIENT_ID = st.sidebar.text_input("Meta App ID", value=secret_client_id)
+    CLIENT_SECRET = st.sidebar.text_input("Meta App Secret", value=secret_client_secret, type="password")
+    REDIRECT_URI = st.sidebar.text_input("Redirect URI", value=secret_redirect_uri)
 
-# 사이드바 3: 더미 데이터 모드
-st.sidebar.markdown("---")
-use_demo = st.sidebar.checkbox("API 연동 없이 더미 데이터로 테스트", value=True)
-
-# OAuth 로그인 및 토큰 리다이렉트 수신 감지
-query_params = st.query_params
-
-if not use_demo:
+    query_params = st.query_params
     if 'code' in query_params and 'access_token' not in st.session_state:
         auth_code = query_params['code']
         st.info("🔄 Instagram 로그인 승인 확인 중...")
@@ -167,20 +171,10 @@ if not use_demo:
             st.session_state['user_id'] = short_res.get('user_id')
             st.query_params.clear()
             st.rerun()
-        else:
-            st.error(f"인증 실패: {short_res.get('error_message', 'OAuth 오류가 발생했습니다. App ID/Secret을 확인하세요.')}")
 
-views = 0
-
-if use_demo:
-    st.info("💡 더미 데이터 모드로 작동 중입니다. 수치를 자유롭게 조절하여 분석을 테스트해 보세요.")
-    views = st.number_input("릴스 조회수 (직접 입력)", value=25000, step=1000)
-else:
     if 'access_token' in st.session_state:
         st.success("✅ Instagram 계정이 연동되었습니다!")
-        instagram_account_id = st.session_state.get('user_id')
-        
-        ig_api = InstagramAPI(st.session_state['access_token'], instagram_account_id)
+        ig_api = InstagramAPI(st.session_state['access_token'])
         reels_data = ig_api.get_reels_media()
         
         if reels_data:
@@ -198,18 +192,26 @@ else:
             st.rerun()
     else:
         if CLIENT_ID and CLIENT_SECRET:
-            # 💡 최소 핵심 권한인 instagram_basic 지정으로 개발자 포털 저장 오류 우회
             auth_url = (
                 f"https://www.facebook.com/v19.0/dialog/oauth"
                 f"?client_id={CLIENT_ID}"
                 f"&redirect_uri={REDIRECT_URI}"
-                f"&scope=instagram_basic"
+                f"&scope=public_profile"
                 f"&response_type=code"
             )
             st.warning("Instagram 연동을 진행하려면 아래 로그인 버튼을 눌러주세요.")
             st.link_button("📸 Instagram 계정으로 로그인", auth_url, type="primary", use_container_width=True)
-        else:
-            st.warning("사이드바에서 Meta App ID와 Meta App Secret을 입력하거나, '더미 데이터로 테스트'를 선택해 주세요.")
+
+# 모드 3: 더미 데이터
+else:
+    st.info("💡 더미 데이터 모드로 작동 중입니다.")
+    views = st.number_input("릴스 조회수 (직접 입력)", value=25000, step=1000)
+
+# 사이드바: 광고 단가 설정
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ 광고 단가 설정")
+cpm_estimate = st.sidebar.number_input("추정 CPM (1,000회 노출 비용)", value=4000, step=500)
+cpc_estimate = st.sidebar.number_input("추정 CPC (클릭당 비용)", value=300, step=50)
 
 # 분석 입력 폼 및 결과 출력
 col1, col2 = st.columns(2)
