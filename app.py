@@ -7,6 +7,7 @@ import streamlit as st
 # ================= =====================
 st.set_page_config(page_title="릴스 성과 & 광고 효율 분석기", layout="wide")
 
+# Google 번역으로 인한 removeChild DOM 에러 방지 HTML
 st.markdown("""
     <html lang="ko" class="notranslate">
     <head><meta name="google" content="notranslate" /></head>
@@ -197,12 +198,11 @@ else:
             st.rerun()
     else:
         if CLIENT_ID and CLIENT_SECRET:
-            # 💡 수정된 표준 Meta Graph API OAuth Scope
             auth_url = (
                 f"https://www.facebook.com/v19.0/dialog/oauth"
                 f"?client_id={CLIENT_ID}"
                 f"&redirect_uri={REDIRECT_URI}"
-                f"&scope=public_profile,instagram_basic,instagram_manage_insights,pages_show_list"
+                f"&scope=public_profile"
                 f"&response_type=code"
             )
             st.warning("Instagram 연동을 진행하려면 아래 로그인 버튼을 눌러주세요.")
