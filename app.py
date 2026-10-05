@@ -26,7 +26,6 @@ class InstagramAPI:
             return []
 
         data = response.json().get('data', [])
-        # REELS (VIDEO) 형태만 필터링
         reels_list = []
         for item in data:
             if item.get('media_type') in ['VIDEO', 'REELS']:
@@ -36,9 +35,13 @@ class InstagramAPI:
                     if metric['name'] == 'plays':
                         plays = metric['values'][0]['value']
                 
+                raw_caption = item.get('caption', '캡션 없음').replace('\n', ' ')
+                short_caption = raw_caption[:18] + '..' if len(raw_caption) > 18 else raw_caption
+                
                 reels_list.append({
                     'id': item['id'],
-                    'caption': item.get('caption', '캡션 없음')[:20] + '...',
+                    'display_label': f"[{item['id'][-4:]}] {short_caption} ({plays:,}회)",
+                    'caption': raw_caption,
                     'views': plays,
                     'likes': item.get('like_count', 0),
                     'comments': item.get('comments_count', 0)
@@ -84,6 +87,14 @@ def calculate_metrics(views, streaming_count, ad_budget, cpc_estimate=300, cpm_e
 # ================= =====================
 st.set_page_config(page_title="릴스 성과 & 광고 효율 분석기", layout="wide")
 
+# 자동 번역으로 인한 removeChild 에러 방지 HTML
+st.markdown("""
+    <html lang="ko" class="notranslate">
+    <head>
+        <meta name="google" content="notranslate" />
+    </head>
+""", unsafe_allow_html=True)
+
 st.title("📊 인스타그램 릴스 & 음원 유입 성과 분석기")
 st.write("인스타그램 연동을 통해 릴스 조회수를 자동으로 불러오고, 광고 대비 음원 스트리밍 유입을 계산합니다.")
 
@@ -92,7 +103,14 @@ st.sidebar.header("🔑 Instagram API 설정")
 access_token = st.sidebar.text_input("Meta Access Token", type="password")
 instagram_account_id = st.sidebar.text_input("Instagram Business Account ID")
 
+# 광고 단가 조정 옵션
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ 광고 단가 설정")
+cpm_estimate = st.sidebar.number_input("추정 CPM (1,000회 노출 비용)", value=4000, step=500)
+cpc_estimate = st.sidebar.number_input("추정 CPC (클릭당 비용)", value=300, step=50)
+
 # 시뮬레이션 샘플 데이터 모드 옵션
+st.sidebar.markdown("---")
 use_demo = st.sidebar.checkbox("API 연동 없이 더미 데이터로 테스트", value=True)
 
 views = 0
@@ -108,11 +126,11 @@ else:
         if reels_data:
             df_reels = pd.DataFrame(reels_data)
             st.subheader("🎬 최근 릴스 목록")
-            st.dataframe(df_reels, use_container_width=True)
+            st.dataframe(df_reels[['id', 'caption', 'views', 'likes', 'comments']], use_container_width=True)
             
-            # 특정 릴스 선택
-            selected_reel_caption = st.selectbox("분석할 릴스를 선택하세요", df_reels['caption'])
-            selected_row = df_reels[df_reels['caption'] == selected_reel_caption].iloc[0]
+            # 고유 display_label을 이용해 중복 방지
+            selected_label = st.selectbox("분석할 릴스를 선택하세요", df_reels['display_label'])
+            selected_row = df_reels[df_reels['display_label'] == selected_label].iloc[0]
             views = selected_row['views']
             st.success(f"선택한 릴스 조회수: {views:,} 회")
     else:
@@ -127,7 +145,7 @@ with col2:
 
 # 결과 계산 출력
 if views > 0:
-    res = calculate_metrics(views, streaming_count, ad_budget)
+    res = calculate_metrics(views, streaming_count, ad_budget, cpc_estimate, cpm_estimate)
 
     st.markdown("---")
     st.subheader("📈 성과 분석 결과")
