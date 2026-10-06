@@ -4,11 +4,20 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-# .env 파일 로드
+# 1. 로컬 환경용 .env 로드
 load_dotenv()
 
+# Streamlit Cloud Secrets와 로컬 .env/환경변수를 모두 안전하게 조회하는 함수
+def get_secret(key_name, default_val=""):
+    try:
+        if hasattr(st, "secrets") and key_name in st.secrets:
+            return st.secrets[key_name]
+    except Exception:
+        pass
+    return os.getenv(key_name, default_val)
+
 # ================= =====================
-# 1. Streamlit 기본 페이지 및 스타일 설정
+# 2. Streamlit 기본 페이지 및 스타일 설정
 # ================= =====================
 st.set_page_config(page_title="인스타그램 월별 광고 효율 & 릴스 분석기", layout="wide")
 
@@ -18,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ================= =====================
-# 2. Meta 통합 API 클래스
+# 3. Meta 통합 API 클래스
 # ================= =====================
 class MetaAPI:
     def __init__(self, access_token, instagram_account_id=None, ad_account_id=None):
@@ -116,14 +125,14 @@ class MetaAPI:
         return pd.DataFrame(monthly_records)
 
 # ================= =====================
-# 3. Streamlit UI 메인 화면
+# 4. Streamlit UI 메인 화면
 # ================= =====================
 st.title("📊 월별 광고비 대비 유입량 & 릴스 성과 자동 분석기")
 
-# .env 파일에서 기본 환경변수 로드
-env_token = os.getenv("META_ACCESS_TOKEN", "")
-env_ig_id = os.getenv("INSTAGRAM_ACCOUNT_ID", "17841400564967767")
-env_ad_id = os.getenv("META_AD_ACCOUNT_ID", "")
+# 시크릿 / 환경변수 안전 로드
+env_token = get_secret("META_ACCESS_TOKEN", "")
+env_ig_id = get_secret("INSTAGRAM_ACCOUNT_ID", "17841400564967767")
+env_ad_id = get_secret("META_AD_ACCOUNT_ID", "")
 
 # 사이드바 설정
 st.sidebar.header("🔑 Meta 계정 연동")
@@ -175,7 +184,7 @@ if user_token and custom_ig_id:
             st.warning("사이드바에 Meta 광고 계정 ID (`act_...`)를 입력해 주세요.")
 
     # ----------------------------------
-    # TAB 2: 개별 릴스 성과 분석 (객체 direct 바인딩 방식으로 오류 완전 해결)
+    # TAB 2: 개별 릴스 성과 분석 (1:1 객체 직접 바인딩)
     # ----------------------------------
     with tab2:
         reels_data = meta_api.get_reels_media()
@@ -184,7 +193,7 @@ if user_token and custom_ig_id:
             
             st.subheader("🎬 분석할 릴스를 선택하세요")
             
-            # [핵심 수정] 리스트 내부 index 번호를 key로 사용
+            # 배열 인덱스 기반 선택으로 동적 1:1 매칭 보장
             reel_indices = list(range(len(reels_data)))
             
             selected_idx = st.selectbox(
@@ -194,7 +203,6 @@ if user_token and custom_ig_id:
                 key="selected_reel_index"
             )
             
-            # 선택한 인덱스의 객체 데이터를 직접 가져옴 (필터링 과정 완전 생략하여 100% 매칭 보장)
             selected_reel = reels_data[selected_idx]
             
             views = selected_reel['views']
@@ -209,14 +217,12 @@ if user_token and custom_ig_id:
             st.markdown("---")
             st.success(f"📌 **선택한 릴스**: {caption}")
 
-            # 선택한 릴스의 수치 카드 표시
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("총 조회수", f"{views:,} 회")
             col2.metric("좋아요 수", f"{likes:,} 개")
             col3.metric("공유 수 (음원 확산)", f"{shares:,} 회")
             col4.metric("인게이지먼트율 (참여율)", f"{engagement_rate} %")
 
-            # 선택한 릴스의 반응 시각화 차트
             st.markdown("---")
             st.write("📈 **선택한 릴스 반응 분석 & 전체 비교**")
             
