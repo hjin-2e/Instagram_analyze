@@ -2,12 +2,15 @@ import os
 import requests
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
 
-# 1. 로컬 환경용 .env 로드
-load_dotenv()
+# 1. 로컬 환경용 python-dotenv 선택적 로드 (배포 서버 ModuleNotFoundError 방지)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
-# Streamlit Cloud Secrets와 로컬 .env/환경변수를 모두 안전하게 조회하는 함수
+# Streamlit Cloud Secrets와 로컬 .env/환경변수를 안전하게 조회하는 함수
 def get_secret(key_name, default_val=""):
     try:
         if hasattr(st, "secrets") and key_name in st.secrets:
@@ -129,7 +132,7 @@ class MetaAPI:
 # ================= =====================
 st.title("📊 월별 광고비 대비 유입량 & 릴스 성과 자동 분석기")
 
-# 시크릿 / 환경변수 안전 로드
+# 시크릿 및 환경변수 로드
 env_token = get_secret("META_ACCESS_TOKEN", "")
 env_ig_id = get_secret("INSTAGRAM_ACCOUNT_ID", "17841400564967767")
 env_ad_id = get_secret("META_AD_ACCOUNT_ID", "")
@@ -184,7 +187,7 @@ if user_token and custom_ig_id:
             st.warning("사이드바에 Meta 광고 계정 ID (`act_...`)를 입력해 주세요.")
 
     # ----------------------------------
-    # TAB 2: 개별 릴스 성과 분석 (1:1 객체 직접 바인딩)
+    # TAB 2: 개별 릴스 성과 분석 (1:1 직접 바인딩)
     # ----------------------------------
     with tab2:
         reels_data = meta_api.get_reels_media()
@@ -193,7 +196,6 @@ if user_token and custom_ig_id:
             
             st.subheader("🎬 분석할 릴스를 선택하세요")
             
-            # 배열 인덱스 기반 선택으로 동적 1:1 매칭 보장
             reel_indices = list(range(len(reels_data)))
             
             selected_idx = st.selectbox(
