@@ -1,11 +1,16 @@
+import os
 import requests
 import pandas as pd
 import streamlit as st
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
 
 # ================= =====================
 # 1. Streamlit 기본 페이지 및 스타일 설정
 # ================= =====================
-st.set_page_config(page_title="인스타그램 릴스 & 광고 성과 자동 분석기", layout="wide")
+st.set_page_config(page_title="인스타그램 월별 광고 효율 & 릴스 분석기", layout="wide")
 
 st.markdown("""
     <html lang="ko" class="notranslate">
@@ -13,7 +18,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ================= =====================
-# 2. Meta 통합 API (Instagram & Marketing API)
+# 2. Meta 통합 API 클래스
 # ================= =====================
 class MetaAPI:
     def __init__(self, access_token, instagram_account_id=None, ad_account_id=None):
@@ -54,136 +59,186 @@ class MetaAPI:
                         reach_count = metric['values'][0]['value']
                 
                 raw_caption = item.get('caption', '캡션 없음').replace('\n', ' ')
-                short_caption = raw_caption[:20] + '..' if len(raw_caption) > 20 else raw_caption
+                short_caption = raw_caption[:25] + '..' if len(raw_caption) > 25 else raw_caption
+                media_id = str(item['id'])
                 
                 reels_list.append({
-                    'id': item['id'],
-                    'display_label': f"[{item['id'][-4:]}] {short_caption} | 조회수 {views_count:,}회",
+                    'id': media_id,
+                    'short_caption': short_caption,
+                    'display_label': f"[{media_id[-4:]}] {short_caption} | 조회수 {views_count:,}회",
                     'caption': raw_caption,
-                    'views': views_count,
-                    'reach': reach_count,
-                    'likes': item.get('like_count', 0),
-                    'comments': item.get('comments_count', 0),
-                    'shares': item.get('shares', {}).get('count', 0) if isinstance(item.get('shares'), dict) else 0
+                    'views': int(views_count),
+                    'reach': int(reach_count),
+                    'likes': int(item.get('like_count', 0)),
+                    'comments': int(item.get('comments_count', 0)),
+                    'shares': int(item.get('shares', {}).get('count', 0)) if isinstance(item.get('shares'), dict) else 0
                 })
         return reels_list
 
-    def get_ad_performance_by_media(self, media_id):
-        """선택한 릴스 소재로 실제 집행된 광고비 및 클릭 데이터 자동 추적"""
+    def get_monthly_ad_performance(self):
+        """월별 광고비 대비 유입량(클릭/노출/CPC 등) 자동 집계"""
         if not self.ad_account_id:
             return None
 
         url = f"{self.base_url}/{self.ad_account_id}/insights"
         params = {
-            'level': 'ad',
-            'fields': 'ad_id,ad_name,spend,impressions,clicks,cpm,cpc,outbound_clicks',
+            'level': 'account',
+            'time_increment': 'monthly',
             'date_preset': 'maximum',
+            'fields': 'date_start,date_stop,spend,impressions,clicks,cpm,cpc',
             'access_token': self.access_token
         }
         res = requests.get(url, params=params)
         
         if res.status_code != 200:
+            st.error(f"❌ 광고 데이터 조회 실패: {res.json().get('error', {}).get('message', '')}")
             return None
 
-        ad_data = res.json().get('data', [])
-        total_spend = 0.0
-        total_impressions = 0
-        total_clicks = 0
+        data = res.json().get('data', [])
+        monthly_records = []
+        
+        for item in data:
+            spend = float(item.get('spend', 0))
+            clicks = int(item.get('clicks', 0))
+            impressions = int(item.get('impressions', 0))
+            month_label = item.get('date_start', '')[:7]
+            
+            if spend > 0:
+                monthly_records.append({
+                    '년월': month_label,
+                    '광고비(원)': int(spend),
+                    '유입량(클릭수)': clicks,
+                    '노출수': impressions,
+                    'CPC(원/클릭)': round(spend / clicks, 1) if clicks > 0 else 0,
+                    'CPM(원/1천회)': round((spend / impressions * 1000), 1) if impressions > 0 else 0
+                })
 
-        for ad in ad_data:
-            total_spend += float(ad.get('spend', 0))
-            total_impressions += int(ad.get('impressions', 0))
-            total_clicks += int(ad.get('clicks', 0))
-
-        if total_spend == 0:
-            return None
-
-        return {
-            "spend": int(total_spend),
-            "impressions": total_impressions,
-            "clicks": total_clicks,
-            "cpm": round((total_spend / total_impressions * 1000), 1) if total_impressions > 0 else 0,
-            "cpc": round(total_spend / total_clicks, 1) if total_clicks > 0 else 0
-        }
+        return pd.DataFrame(monthly_records)
 
 # ================= =====================
 # 3. Streamlit UI 메인 화면
 # ================= =====================
-st.title("📊 인스타그램 릴스 광고비 기반 성과 자동 분석기")
-st.write("수동 입력 없이 Meta API의 실시간 집행 광고비와 릴스 반응 데이터만으로 광고 효율을 정밀 분석합니다.")
+st.title("📊 월별 광고비 대비 유입량 & 릴스 성과 자동 분석기")
+
+# .env 파일에서 기본 환경변수 로드
+env_token = os.getenv("META_ACCESS_TOKEN", "")
+env_ig_id = os.getenv("INSTAGRAM_ACCOUNT_ID", "17841400564967767")
+env_ad_id = os.getenv("META_AD_ACCOUNT_ID", "")
 
 # 사이드바 설정
-st.sidebar.header("🔑 Meta 계정 자동 연동")
-user_token = st.sidebar.text_input("Access Token (ads_read 권한 포함)", type="password")
-custom_ig_id = st.sidebar.text_input("Instagram 계정 ID (178414...)", value="17841400564967767")
-ad_account_id = st.sidebar.text_input("Meta 광고 계정 ID (act_...)", placeholder="예: act_1234567890")
+st.sidebar.header("🔑 Meta 계정 연동")
+user_token = st.sidebar.text_input("Access Token", value=env_token, type="password")
+custom_ig_id = st.sidebar.text_input("Instagram 계정 ID", value=env_ig_id)
+ad_account_id = st.sidebar.text_input("Meta 광고 계정 ID (act_...)", value=env_ad_id)
 
 if user_token and custom_ig_id:
     meta_api = MetaAPI(user_token, instagram_account_id=custom_ig_id.strip(), ad_account_id=ad_account_id.strip())
-    reels_data = meta_api.get_reels_media()
     
-    if reels_data:
-        df_reels = pd.DataFrame(reels_data)
-        st.subheader("🎬 최근 내 릴스 목록")
-        st.dataframe(df_reels[['id', 'caption', 'views', 'likes', 'comments', 'shares']], use_container_width=True)
-        
-        selected_label = st.selectbox("📌 분석할 릴스를 선택하세요", df_reels['display_label'])
-        selected_row = df_reels[df_reels['display_label'] == selected_label].iloc[0]
-        
-        views = selected_row['views']
-        likes = selected_row['likes']
-        comments = selected_row['comments']
-        shares = selected_row['shares']
-        selected_media_id = selected_row['id']
+    tab1, tab2 = st.tabs(["📅 월별 광고비 vs 유입량 분석", "🎬 개별 릴스 성과 분석"])
 
-        st.success(f"선택한 릴스: **{selected_row['caption']}**")
+    # ----------------------------------
+    # TAB 1: 월별 광고비 vs 유입량 분석
+    # ----------------------------------
+    with tab1:
+        st.subheader("🗓️ 최근 월별 광고비 집행액 & 유입 성과 추이")
+        if ad_account_id:
+            df_monthly = meta_api.get_monthly_ad_performance()
+            if df_monthly is not None and not df_monthly.empty:
+                df_monthly = df_monthly.sort_values(by='년월', ascending=False).reset_index(drop=True)
+                
+                latest = df_monthly.iloc[0]
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("최근 월 (년-월)", latest['년월'])
+                col2.metric("이번 달 광고 집행비", f"{latest['광고비(원)']:,} 원")
+                col3.metric("이번 달 총 유입량", f"{latest['유입량(클릭수)']:,} 회")
+                col4.metric("평균 클릭 단가 (CPC)", f"{latest['CPC(원/클릭)']} 원")
 
-        # 광고 데이터 조회
-        ad_perf = meta_api.get_ad_performance_by_media(selected_media_id) if ad_account_id else None
+                st.markdown("---")
+                st.write("📊 **월별 광고비 vs 유입량(클릭수) 시각화 차트**")
+                
+                df_chart = df_monthly.sort_values(by='년월', ascending=True).set_index('년월')
+                
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
+                    st.write("💰 **월별 광고 집행 비용 (원)**")
+                    st.bar_chart(df_chart['광고비(원)'])
+                with col_c2:
+                    st.write("🎯 **월별 실제 유입량 (클릭수)**")
+                    st.line_chart(df_chart['유입량(클릭수)'])
 
-        st.markdown("---")
-        st.subheader("📈 1. 릴스 자연 반응성 분석 (Organic Response)")
-        
-        total_engagement = likes + comments + shares
-        engagement_rate = round((total_engagement / views * 100), 2) if views > 0 else 0
-
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("총 조회수", f"{views:,} 회")
-        col2.metric("좋아요 수", f"{likes:,} 개")
-        col3.metric("공유 수 (음원 확산)", f"{shares:,} 회")
-        col4.metric("인게이지먼트율", f"{engagement_rate} %")
-
-        st.markdown("---")
-        st.subheader("🎯 2. 집행 광고비 대비 유입 성과 리포트")
-
-        if ad_perf:
-            spend = ad_perf['spend']
-            clicks = ad_perf['clicks']
-            impressions = ad_perf['impressions']
-            cpm = ad_perf['cpm']
-            cpc = ad_perf['cpc']
-            cpv = round(spend / views, 1) if views > 0 else 0
-
-            m1, m2, m3 = st.columns(3)
-            m1.metric("총 집행 광고 비용", f"{spend:,} 원")
-            m2.metric("실제 광고 노출 수", f"{impressions:,} 회")
-            m3.metric("프로필/음원링크 클릭 수", f"{clicks:,} 회")
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            k1, k2, k3 = st.columns(3)
-            k1.metric("1회 재생당 광고 단가 (CPV)", f"약 {cpv} 원 / 재생")
-            k2.metric("클릭당 광고 단가 (CPC)", f"약 {cpc:,} 원 / 클릭")
-            k3.metric("1,000회 노출 단가 (CPM)", f"약 {cpm:,} 원")
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            if cpc <= 250:
-                st.success("🔥 **고효율 음원 광고**: 클릭 단가가 낮아 시청자들이 멜론/음원 링크로 활발히 이동하고 있습니다. 광고 증액을 추천합니다!")
-            elif cpc <= 500:
-                st.info("👍 **보통 수준 성과**: 평균적인 음원 마케팅 단가를 유지하고 있습니다.")
+                st.markdown("---")
+                st.write("📋 **월별 데이터 상세 테이블**")
+                st.dataframe(df_monthly, use_container_width=True)
             else:
-                st.warning("⚠️ **단가 높음**: 클릭당 비용이 높습니다. 릴스의 초반 3초 구간이나 캡션의 음원 링크 유도 문구를 수정해 보세요.")
+                st.info("해당 기간 동안 집행된 광고 데이터가 없습니다.")
         else:
-            st.info("💡 사이드바에 **Meta 광고 계정 ID(`act_...`)**를 입력하시면 해당 릴스에 실제 태운 광고비와 클릭 단가가 자동으로 표시됩니다.")
+            st.warning("사이드바에 Meta 광고 계정 ID (`act_...`)를 입력해 주세요.")
 
+    # ----------------------------------
+    # TAB 2: 개별 릴스 성과 분석 (객체 direct 바인딩 방식으로 오류 완전 해결)
+    # ----------------------------------
+    with tab2:
+        reels_data = meta_api.get_reels_media()
+        if reels_data:
+            df_reels = pd.DataFrame(reels_data)
+            
+            st.subheader("🎬 분석할 릴스를 선택하세요")
+            
+            # [핵심 수정] 리스트 내부 index 번호를 key로 사용
+            reel_indices = list(range(len(reels_data)))
+            
+            selected_idx = st.selectbox(
+                "📌 릴스 선택",
+                options=reel_indices,
+                format_func=lambda idx: reels_data[idx]['display_label'],
+                key="selected_reel_index"
+            )
+            
+            # 선택한 인덱스의 객체 데이터를 직접 가져옴 (필터링 과정 완전 생략하여 100% 매칭 보장)
+            selected_reel = reels_data[selected_idx]
+            
+            views = selected_reel['views']
+            likes = selected_reel['likes']
+            comments = selected_reel['comments']
+            shares = selected_reel['shares']
+            caption = selected_reel['caption']
+
+            total_engagement = likes + comments + shares
+            engagement_rate = round((total_engagement / views * 100), 2) if views > 0 else 0
+
+            st.markdown("---")
+            st.success(f"📌 **선택한 릴스**: {caption}")
+
+            # 선택한 릴스의 수치 카드 표시
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("총 조회수", f"{views:,} 회")
+            col2.metric("좋아요 수", f"{likes:,} 개")
+            col3.metric("공유 수 (음원 확산)", f"{shares:,} 회")
+            col4.metric("인게이지먼트율 (참여율)", f"{engagement_rate} %")
+
+            # 선택한 릴스의 반응 시각화 차트
+            st.markdown("---")
+            st.write("📈 **선택한 릴스 반응 분석 & 전체 비교**")
+            
+            chart_col1, chart_col2 = st.columns(2)
+            
+            with chart_col1:
+                st.write("🎯 **인게이지먼트 구성 비율 (좋아요 / 댓글 / 공유)**")
+                df_engagement = pd.DataFrame({
+                    '반응 유형': ['좋아요', '댓글', '공유'],
+                    '수량': [likes, comments, shares]
+                }).set_index('반응 유형')
+                st.bar_chart(df_engagement)
+
+            with chart_col2:
+                st.write("🏆 **전체 릴스 조회수 Top 10**")
+                df_top_views = df_reels.sort_values(by='views', ascending=False).head(10)[['short_caption', 'views']].set_index('short_caption')
+                st.bar_chart(df_top_views)
+
+            st.markdown("---")
+            st.write("📋 **전체 릴스 목록 및 요약 데이터**")
+            st.dataframe(df_reels[['id', 'caption', 'views', 'likes', 'comments', 'shares']], use_container_width=True)
+        else:
+            st.info("등록된 릴스 데이터가 없습니다.")
 else:
     st.info("👈 사이드바에 Access Token과 계정 ID를 입력해 주세요.")
