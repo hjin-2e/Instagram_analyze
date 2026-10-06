@@ -2,6 +2,14 @@ import os
 import requests
 import pandas as pd
 import streamlit as st
+from datetime import datetime, timedelta
+
+# 1. 로컬 환경용 python-dotenv 선택적 로드
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # Streamlit Cloud Secrets 및 환경변수 안전 조회 함수
 def get_secret(key_name, default_val=""):
@@ -13,7 +21,7 @@ def get_secret(key_name, default_val=""):
     return os.getenv(key_name, default_val)
 
 # ================= =====================
-# 1. Streamlit 기본 페이지 및 스타일 설정
+# 2. Streamlit 기본 페이지 및 스타일 설정
 # ================= =====================
 st.set_page_config(page_title="인스타그램 월별 광고 효율 & 릴스 분석기", layout="wide")
 
@@ -23,14 +31,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ================= =====================
-# 2. Meta 통합 API 클래스
+# 3. Meta 통합 API 클래스
 # ================= =====================
 class MetaAPI:
     def __init__(self, access_token, instagram_account_id=None, ad_account_id=None):
         self.access_token = access_token
         self.base_url = "https://graph.facebook.com/v19.0"
         self.account_id = instagram_account_id
-        self.ad_account_id = ad_account_id if not ad_account_id or ad_account_id.startswith('act_') else f"act_{ad_account_id}"
+        
+        # 광고 계정 ID 포맷 정리 (act_ 필수)
+        if ad_account_id:
+            ad_account_id = ad_account_id.strip()
+            self.ad_account_id = ad_account_id if ad_account_id.startswith('act_') else f"act_{ad_account_id}"
+        else:
+            self.ad_account_id = None
 
     def get_reels_media(self):
         """내 계정의 최근 릴스 목록 및 인사이트 가져오기"""
@@ -83,32 +97,49 @@ class MetaAPI:
     def get_monthly_ad_performance(self):
         """월별 광고비 대비 유입량(클릭/노출/CPC 등) 자동 집계"""
         if not self.ad_account_id:
+            st.info("💡 사이드바에 Meta 광고 계정 ID(`act_...`)가 설정되지 않았습니다.")
             return None
 
         url = f"{self.base_url}/{self.ad_account_id}/insights"
+        
+        # 최근 1년(365일) 전부터 오늘까지 범위 지정 (date_preset 호환성 문제 완전 방지)
+        today = datetime.now()
+        one_year_ago = today - timedelta(days=365)
+        
+        time_range = f"{{'since':'{one_year_ago.strftime('%Y-%m-%d')}','until':'{today.strftime('%Y-%m-%d')}'}}"
+
         params = {
             'level': 'account',
             'time_increment': 'monthly',
-            'date_preset': 'maximum',
+            'time_range': time_range,
             'fields': 'date_start,date_stop,spend,impressions,clicks,cpm,cpc',
             'access_token': self.access_token
         }
         res = requests.get(url, params=params)
         
         if res.status_code != 200:
-            st.error(f"❌ 광고 데이터 조회 실패: {res.json().get('error', {}).get('message', '')}")
+            err_msg = res.json().get('error', {}).get('message', '광고 API 호출 에러')
+            st.error(f"❌ 광고 데이터 조회 실패: {err_msg}")
             return None
 
         data = res.json().get('data', [])
-        monthly_records = []
         
+        if not data:
+            # time_range로 조회가 안 될 경우 date_preset fallback 실행
+            params.pop('time_range', None)
+            params['date_preset'] = 'maximum'
+            res = requests.get(url, params=params)
+            if res.status_code == 200:
+                data = res.json().get('data', [])
+
+        monthly_records = []
         for item in data:
             spend = float(item.get('spend', 0))
             clicks = int(item.get('clicks', 0))
             impressions = int(item.get('impressions', 0))
             month_label = item.get('date_start', '')[:7]
             
-            if spend > 0:
+            if spend > 0 or clicks > 0:
                 monthly_records.append({
                     '년월': month_label,
                     '광고비(원)': int(spend),
@@ -121,7 +152,7 @@ class MetaAPI:
         return pd.DataFrame(monthly_records)
 
 # ================= =====================
-# 3. Streamlit UI 메인 화면
+# 4. Streamlit UI 메인 화면
 # ================= =====================
 st.title("📊 월별 광고비 대비 유입량 & 릴스 성과 자동 분석기")
 
@@ -175,9 +206,9 @@ if user_token and custom_ig_id:
                 st.write("📋 **월별 데이터 상세 테이블**")
                 st.dataframe(df_monthly, use_container_width=True)
             else:
-                st.info("해당 기간 동안 집행된 광고 데이터가 없습니다.")
+                st.warning("⚠️ 연결된 Meta 광고 계정에 집행된 최근 1년간의 광고 데이터가 없거나 조회할 수 없습니다.")
         else:
-            st.warning("사이드바에 Meta 광고 계정 ID (`act_...`)를 입력해 주세요.")
+            st.warning("👈 사이드바 또는 Secrets에 Meta 광고 계정 ID (`act_...`)를 입력해 주세요.")
 
     # ----------------------------------
     # TAB 2: 개별 릴스 성과 분석
