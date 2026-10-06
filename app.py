@@ -3,14 +3,7 @@ import requests
 import pandas as pd
 import streamlit as st
 
-# 1. 로컬 환경용 python-dotenv 선택적 로드 (배포 서버 ModuleNotFoundError 방지)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
-
-# Streamlit Cloud Secrets와 로컬 .env/환경변수를 안전하게 조회하는 함수
+# Streamlit Cloud Secrets 및 환경변수 안전 조회 함수
 def get_secret(key_name, default_val=""):
     try:
         if hasattr(st, "secrets") and key_name in st.secrets:
@@ -20,7 +13,7 @@ def get_secret(key_name, default_val=""):
     return os.getenv(key_name, default_val)
 
 # ================= =====================
-# 2. Streamlit 기본 페이지 및 스타일 설정
+# 1. Streamlit 기본 페이지 및 스타일 설정
 # ================= =====================
 st.set_page_config(page_title="인스타그램 월별 광고 효율 & 릴스 분석기", layout="wide")
 
@@ -30,7 +23,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ================= =====================
-# 3. Meta 통합 API 클래스
+# 2. Meta 통합 API 클래스
 # ================= =====================
 class MetaAPI:
     def __init__(self, access_token, instagram_account_id=None, ad_account_id=None):
@@ -128,7 +121,7 @@ class MetaAPI:
         return pd.DataFrame(monthly_records)
 
 # ================= =====================
-# 4. Streamlit UI 메인 화면
+# 3. Streamlit UI 메인 화면
 # ================= =====================
 st.title("📊 월별 광고비 대비 유입량 & 릴스 성과 자동 분석기")
 
@@ -187,7 +180,7 @@ if user_token and custom_ig_id:
             st.warning("사이드바에 Meta 광고 계정 ID (`act_...`)를 입력해 주세요.")
 
     # ----------------------------------
-    # TAB 2: 개별 릴스 성과 분석 (1:1 직접 바인딩)
+    # TAB 2: 개별 릴스 성과 분석
     # ----------------------------------
     with tab2:
         reels_data = meta_api.get_reels_media()
